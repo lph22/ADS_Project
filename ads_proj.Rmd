@@ -1,0 +1,779 @@
+---
+title: "Early Heart Disease Detection"
+author: "Team 9"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+subtitle: "Applied Data Science"
+---
+
+```{r setup, include=FALSE}
+if (!require("ggplot2")) {
+   install.packages("ggplot2")
+   library(ggplot2)
+}
+if (!require("ucimlrepo")) {
+   install.packages("ucimlrepo")
+   library(ucimlrepo)
+}
+if (!require("xgboost")) {
+   install.packages("xgboost")
+   library(xgboost)
+}
+if (!require("Matrix")) {
+   install.packages("Matrix")
+   library(Matrix)
+}
+if (!require("caret")) {
+   install.packages("caret")
+   library(caret)
+}
+if (!require("glmnet")) {
+   install.packages("glmnet")
+   library(glmnet)
+}
+if (!require("rpart")) {
+   install.packages("rpart")
+   library(rpart)
+}
+if (!require("pROC")) {
+   install.packages("pROC")
+   library(pROC)
+}
+if (!require("corrplot")) {
+   install.packages("corrplot")
+   library(corrplot)
+}
+if (!require("rpart.plot")) {
+   install.packages("rpart.plot")
+   library(rpart.plot)
+}
+if (!require("reshape2")) {
+   install.packages("reshape2")
+   library(reshape2)
+}
+if (!require("GGally")) {
+   install.packages("GGally")
+   library(GGally)
+}
+if (!require("Amelia")) {
+   install.packages("Amelia")
+   library(Amelia)
+}
+if (!require("ggcorrplot")) {
+   install.packages("ggcorrplot")
+   library(ggcorrplot)
+}
+if (!require("tidyverse")) {
+   install.packages("tidyverse")
+   library(tidyverse)
+}
+if (!require("kableExtra")) {
+   install.packages("kableExtra")
+   library(kableExtra)
+}
+if (!require("randomForest")) {
+   install.packages("randomForest")
+   library(randomForest)
+}
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Helper Functions
+
+  * prob_to_class: This function translates probability outputs from models into binary class predictions, where any probability above 0.5 is assigned a 1 (disease) and below 0.5 is assigned a 0 (no disease).
+
+
+```{r}
+# Helper Functions
+prob_to_class <- function(ranking_lr,threshold=0.5) {
+  # This helper function converts LR probability outputs into 1 and 0 classes
+  temp <- ranking_lr > threshold
+  temp[temp==TRUE] <- 1
+  temp[temp==FALSE] <- 0
+  return(as.factor(temp))
+}
+```
+
+
+## Data Preparation
+
+  * Loading and Structuring Data: The code loads the heart disease dataset from the UCI repository, separates features and target labels, and converts the target to a binary format (1 for disease presence, 0 for absence).
+
+  * Combining Data for EDA: The features and labels are combined into a single data frame for easy EDA.
+
+Basic Dataset Information and Summary Statistics:
+
+str(), head(), summary(): These functions reveal the dataset structure, initial rows, and summary statistics.
+
+Missing values are counted using colSums(is.na(data)), and duplicate rows are identified to ensure data integrity.
+
+Numerical summary statistics (mean, standard deviation, min, max) are calculated to understand variable spread and tendency.
+
+
+```{r}
+# Load heart disease dataset from UCI Machine Learning repository
+heart_disease <- fetch_ucirepo(id = 45)
+heart_data.X <- heart_disease$data$features  # Features matrix
+heart_data.Y <- heart_disease$data$targets   # Target variable
+
+# Recode target to binary: 0 (no disease) and 1 (disease)
+labels <- ifelse(as.numeric(heart_data.Y$num) == 0, 0, 1)
+features <- as.matrix(heart_data.X)  # Convert features to matrix format
+```
+
+### Exploratory Data Analysis
+
+Distribution Analysis:
+
+For numerical features, histograms are plotted to understand each feature's distribution.
+Target Variable Distribution: A bar plot illustrates the distribution of the target variable (Class) to check for class imbalance.
+
+Outlier Detection:
+
+Boxplots of each numeric variable display potential outliers, aiding in understanding feature ranges and variance.
+
+Missing Data Visualization:
+
+A missing data map highlights the dataset's missing values, if any, making it easier to decide on imputation or deletion.
+
+```{r}
+# Combine features and labels into a single data frame for EDA
+data <- cbind(features, Class = labels)
+data <- as.data.frame(data)
+
+# Basic dataset information and exploratory analysis
+cat("Dataset Structure:\n")
+str(data)  # Display structure of dataset
+cat("\nFirst few rows:\n")
+print(head(data))
+cat("\nSummary Statistics:\n")
+print(summary(data))
+cat("\nMissing Values by Column:\n")
+print(colSums(is.na(data)))
+cat("\nNumber of Duplicate Rows:\n")
+print(sum(duplicated(data)))
+
+# Summary statistics for numeric variables
+cat("\nSummary Statistics (Numeric Variables):\n")
+data %>%
+  summarise_all(list(mean = ~mean(. , na.rm = TRUE), 
+                     sd = ~sd(. , na.rm = TRUE), 
+                     min = ~min(. , na.rm = TRUE), 
+                     max = ~max(. , na.rm = TRUE)))
+
+# Distribution of numeric variables
+numeric_cols <- sapply(data, is.numeric)
+data_num <- data[, numeric_cols]
+data_num %>% 
+  gather() %>% 
+  ggplot(aes(value)) + 
+  geom_histogram(bins = 30, color = "black", fill = "lightblue") +
+  facet_wrap(~ key, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distributions of Numeric Variables")
+
+# Distribution of categorical variables
+categorical_cols <- sapply(data, is.factor)
+data_cat <- data[, categorical_cols]
+for (col in names(data_cat)) {
+  print(ggplot(data, aes_string(col)) + 
+          geom_bar(fill = "lightgreen", color = "black") +
+          theme_minimal() +
+          labs(title = paste("Distribution of", col)))
+}
+
+# Target variable distribution
+ggplot(data, aes(x = Class)) + 
+  geom_bar(fill = "salmon", color = "black") +
+  theme_minimal() +
+  labs(title = "Target Variable Distribution (Disease Presence)")
+
+# Outlier detection with boxplots
+data_num %>%
+  gather() %>%
+  ggplot(aes(x = key, y = value)) +
+  geom_boxplot(fill = "skyblue", color = "black", outlier.colour = "red", outlier.shape = 16) +
+  theme_minimal() +
+  labs(title = "Boxplots for Numeric Variables") +
+  coord_flip()
+
+# Visualize missing data
+missmap(data, main = "Missing Data Map", col = c("red", "grey"), legend = TRUE)
+
+```
+
+### Train-Test Split and Scaling
+
+First we clean the data by removing rows with NA values.
+
+```{r}
+# Remove rows with missing values from the dataset
+na_rows <- which(rowSums(is.na(features)) > 0)
+features <- features[-na_rows, ]
+labels <- labels[-na_rows]
+```
+
+Data Splitting: 
+
+The dataset is split into training and testing sets (75%-25% split), ensuring the model is evaluated on unseen data.
+
+Scaling:
+
+Only training data mean and standard deviation are used to scale the training and test sets, preserving data leakage prevention by not incorporating test data statistics into training.
+
+```{r}
+set.seed(123) # For reproducibility
+
+# Perform train and test split
+train_in <- sample(1:nrow(features), 0.75 * nrow(features))
+train_feat <- features[train_in, ]
+train_lab <- labels[train_in]
+test_feat <- features[-train_in, ]
+test_lab <- labels[-train_in]
+
+# Calculate mean and standard deviation from training data only
+train_mean <- apply(train_feat, 2, mean)
+train_sd <- apply(train_feat, 2, sd)
+
+# Scale training data
+train_feat <- scale(train_feat, center = train_mean, scale = train_sd)
+
+# Scale test data using training data parameters
+test_feat <- scale(test_feat, center = train_mean, scale = train_sd)
+
+```
+
+
+## Model Development
+
+Four models are employed to classify heart disease presence: XGBoost, Lasso Logistic Regression, Random Forest, and Decision Trees.
+
+### Model 1: XG Boost
+
+Data Preparation: xgb.DMatrix format is used for efficient data handling by XGBoost.
+
+Parameter Tuning:
+
+Parameters like eta, max_depth, and gamma are set to optimize model learning, control overfitting, and adjust learning rate and tree depth for better generalization.
+
+Training and Evaluation:
+
+Model is trained for 100 rounds with early stopping after 10 rounds if no improvement in validation loss.
+
+Performance metrics: Confusion matrix, feature importance plot, and AUC score, with ROC curve plotted to visualize trade-offs between sensitivity and specificity.
+
+
+```{r}
+# Prepare data for XGBoost
+dtrain <- xgb.DMatrix(data = train_feat, label = train_lab)
+dtest <- xgb.DMatrix(data = test_feat, label = test_lab)
+
+# Define model parameters
+param <- list(
+  booster = "gbtree",           # Tree-based model
+  objective = "binary:logistic",# Binary classification
+  eta = 0.1,                    # Learning rate
+  max_depth = 3,                # Max tree depth
+  gamma = 1,                    # Regularization parameter
+  subsample = 0.8,              # Subsample ratio
+  colsample_bytree = 0.8,       # Feature sample ratio
+  eval_metric = "logloss"       # Evaluation metric
+)
+
+# Train XGBoost model
+xgb_model <- xgb.train(
+  params = param,
+  data = dtrain,
+  nrounds = 100,                    # Number of boosting rounds
+  watchlist = list(train = dtrain, eval = dtest),
+  early_stopping_rounds = 10,       # Stop if no improvement
+  print_every_n = 10                # Print progress
+)
+
+# Predict probabilities and convert to class labels
+pred_probs <- predict(xgb_model, dtest)
+pred_labels <- prob_to_class(pred_probs)
+
+# Evaluate model accuracy with confusion matrix
+confusion_matrix <- confusionMatrix(reference = as.factor(test_lab), data = as.factor(pred_labels))
+print(confusion_matrix)
+
+# Feature importance
+importance_matrix <- xgb.importance(model = xgb_model)
+print(importance_matrix)
+xgb.plot.importance(importance_matrix)
+
+# AUC score
+# Calculate AUC
+roc_xgb <- roc(test_lab, pred_probs)  # Compute ROC curve
+auc_xgb <- auc(roc_xgb)             # Calculate AUC
+print(paste("AUC:", auc_xgb))
+
+# Plot the ROC curve
+plot(roc_xgb, col = "blue", main = "ROC Curve for XG Boost Model")
+```
+
+
+### Model 2: Lasso Logistic Regression
+
+Cross-Validation for Lambda: cv.glmnet with alpha = 1 performs cross-validation to select the optimal lambda value, balancing model fit and regularization.
+
+Final Model Training: With the optimal lambda, the Lasso model is retrained on all features to minimize multicollinearity and overfitting.
+
+Class Prediction: Using prob_to_class, predictions are converted to binary labels, evaluated with a confusion matrix, and ROC and AUC scores are calculated.
+
+
+```{r}
+#LASSO Logistic Regression using glmnet package
+
+#Train a cross validation model to find optimal lambda value 
+# using cv.glmnet with alpha =1 and family = "binomial".
+cv_model <- cv.glmnet(train_feat, train_lab, family = "binomial", alpha = 1)
+
+#Extracted optimal lambda value for further tuning.
+lambda <- cv_model$lambda.min
+
+#Trained final model on all features with the optimal lambda.
+lasso <- glmnet(train_feat,train_lab,family = "binomial", 
+                alpha = 1, lambda = lambda)
+
+#Ranking probabilities given by Lasso on the training data.
+ranking_lasso.train <- predict(lasso,train_feat, type="response")
+
+#Ranking probabilities given by Lasso on the validation data.
+ranking_lasso.test <- predict(lasso,test_feat, type="response")
+
+#Transformed training probability predictions to class predictions 
+# using 0.5 threshold
+#Used prob_to_class function provided on sample submission.
+class_train.lasso <- prob_to_class(ranking_lasso.train)
+
+#Transformed validation probability predictions to class predictions 
+# using 0.5 threshold
+class_test.lasso <- prob_to_class(ranking_lasso.test)
+
+#Confusion matrix for validation data.
+cm_test.lasso <- confusionMatrix(reference = as.factor(test_lab),
+                                 data = as.factor(class_test.lasso))
+
+#Test prediction results
+print(cm_test.lasso)
+
+lasso_test.roc <- roc(test_lab, as.vector(ranking_lasso.test))
+lasso_test.auc <- lasso_test.roc$auc
+
+#AUC Validation Set
+lasso_test.auc
+
+# Plot the ROC curve
+plot(lasso_test.roc, col = "blue", main = "ROC Curve for Lasso Logistic Regression Model")
+```
+
+
+### Model 3: Random Forest
+
+Training: The Random Forest model is trained with 100 trees and a mtry value of 2, balancing accuracy and computation time.
+
+Feature Importance: The varImpPlot function visualizes feature importance scores, showing the most influential features in classification.
+
+Performance Evaluation: Predictions are made on test data and assessed via AUC and ROC curve analysis.
+
+```{r}
+# Random Forest
+trainData <- data.frame(train_feat,Class = train_lab)
+testData <- data.frame(test_feat,Class = test_lab)
+
+rf_model <- randomForest(Class ~ ., data = trainData,
+                         ntree = 100, mtry = 2, importance = TRUE)
+print(rf_model)
+
+# Predict probabilities (second column for class 1 probabilities)
+rf_pred <- predict(rf_model, testData)
+
+# Predict and evaluate
+predictions <- prob_to_class(rf_pred)
+conf_matrix <- confusionMatrix(reference = as.factor(testData$Class),
+                               data = predictions)
+print(conf_matrix)
+
+# Feature importance
+importance(rf_model)
+varImpPlot(rf_model)
+
+# Calculate AUC
+rf_roc <- roc(testData$Class, rf_pred)  # Compute ROC curve
+rf_auc <- auc(rf_roc)                   # Calculate AUC
+print(paste("AUC:", rf_auc))
+
+# Plot the ROC curve
+plot(rf_roc, col = "blue", main = "ROC Curve for Random Forest Model")
+```
+
+
+### Model 4: Decision Trees
+
+Training: Using the rpart function, the Decision Tree is trained with minsplit = 20 and complexity parameter cp = 0.01.
+
+Tree Visualization: rpart.plot generates a tree plot to help interpret the model's decision-making process.
+
+Evaluation: Predictions and probability-based ROC/AUC assessments provide a complete view of model performance.
+
+```{r}
+# Data preparation
+trainData2 <- trainData
+testData2 <- testData
+trainData2$Class <- as.factor(trainData2$Class)
+testData2$Class <- as.factor(testData2$Class)
+# Train the decision tree model
+tree_model <- rpart(
+  Class ~ .,          # Formula: predicting Class using all other variables
+  data = trainData2,  # Training data
+  method = "class",   # Method "class" for classification trees
+  control = rpart.control(minsplit = 20, cp = 0.01)  # Control parameters
+)
+
+# Print the model summary
+print(tree_model)
+
+# Visualize the decision tree
+rpart.plot(tree_model, type = 2, extra = 106)
+
+# Make predictions on the test set
+pred <- predict(tree_model, testData2)
+
+pred <- prob_to_class(pred[,2])
+
+# Confusion matrix to evaluate performance
+dt_conf_mat <- confusionMatrix(reference = testData2$Class, data = pred)
+
+# For ROC and AUC
+prob <- predict(tree_model, testData2, type = "prob")[, 2]
+roc_curve <- roc(testData2$Class, prob)
+print(paste("AUC:", auc(roc_curve)))
+# Plot the ROC curve
+plot(roc_curve, col = "blue", main = "ROC Curve for Decision Trees Model")
+```
+
+
+## Feature Selection
+
+To optimize feature selection, we used correlation analysis and Recursive Feature Elimination (RFE) to identify the most predictive and non-redundant features.
+
+### Correlation Analysis with Corrplot
+
+We generated a correlation matrix for the numeric features and visualized it with a corrplot to identify relationships among features and distinguish any highly correlated pairs.
+
+```{r}
+# Find correlation between features and objective label
+all <- cbind(train_feat,train_lab)
+corrplot(cor(as.matrix(all)))
+```
+
+### Recursive Feature Elimination (RFE)
+
+We used RFE with Random Forest to iteratively rank features by importance, testing feature subsets of sizes 3 to 7, to systematically reduce features to a core set of the most relevant ones for model accuracy.
+
+Using cross-validation, RFE selected the smallest feature set that maintained high model performance.
+
+Insights from the corrplot helped prioritize initial feature removals, making the RFE process more efficient.
+
+```{r, warning=FALSE}
+#Recursive Feature Elimination with Random Forest Functions and Cross Validation.
+
+#Defined optimization parameters, using random forest as the model to optimize.
+#Used cross validation as the method.
+#Left additional parameters to be the default.
+rfecon <- rfeControl(functions = rfFuncs,method = "cv",
+                     number = 10,verbose = FALSE)
+
+#Run RFE to find optimal features
+rfe <- rfe(train_feat, train_lab,sizes = seq(3, 7, 1), 
+           rfeControl = rfecon)
+
+# Optimal features
+rfe_features <- rfe$optVariables
+
+print(rfe_features)
+```
+
+### Summary of Feature Selection Results
+
+By combining corrplot insights with RFE, we derived a reduced feature set that improved model accuracy and interpretability while reducing training time. We now reduce the data and retrain the models with the reduced data.
+
+```{r}
+#Reduced data sets to only RFE selected features
+train_feat_rfe <- train_feat[,rfe_features]
+test_feat_rfe <- test_feat[,rfe_features]
+```
+
+
+## Reduced Models
+
+### XG Boost
+
+```{r}
+dtrain_rfe <- xgb.DMatrix(data = train_feat_rfe, label = train_lab)
+dtest_rfe <- xgb.DMatrix(data = test_feat_rfe, label = test_lab)
+
+param <- list(
+  booster = "gbtree",           # Use tree-based model
+  objective = "binary:logistic",  # Specify classification objective
+  eta = 0.1,                    # Learning rate
+  max_depth = 3, # Maximum depth of each tree
+  gamma = 1,
+  subsample = 0.8,              # Subsampling ratio
+  colsample_bytree = 0.8,       # Feature sampling ratio
+  eval_metric = "logloss"          # Evaluation metric for classification
+)
+
+xgb_model_rfe <- xgb.train(
+  params = param,
+  data = dtrain_rfe,
+  nrounds = 100,                    # Number of boosting rounds
+  watchlist = list(train = dtrain_rfe, eval = dtest_rfe),  # Monitor training and test performance
+  early_stopping_rounds = 10,       # Stop early if no improvement for 10 rounds
+  print_every_n = 10                # Print progress every 10 rounds
+)
+
+
+
+# Predict probabilities
+pred_probs_rfe <- predict(xgb_model_rfe, dtest_rfe)
+
+# Convert probabilities to class labels
+pred_labels_rfe <- ifelse(pred_probs_rfe > 0.5, 1, 0)
+
+# Evaluate accuracy
+xgb_confusion_matrix_rfe <- confusionMatrix(reference = as.factor(test_lab), 
+                                    data = as.factor(pred_labels_rfe))
+print(xgb_confusion_matrix_rfe)
+
+# Plot feature importance
+xgb_importance_matrix_rfe <- xgb.importance(model = xgb_model)
+print(xgb_importance_matrix_rfe)
+
+# Plot the importance
+xgb.plot.importance(xgb_importance_matrix_rfe)
+
+# AUC score
+# Calculate AUC
+roc_xgb_rfe <- roc(test_lab, pred_probs_rfe)  # Compute ROC curve
+auc_xgb_rfe <- auc(roc_xgb_rfe)             # Calculate AUC
+print(paste("AUC:", auc_xgb_rfe))
+
+# Plot the ROC curve
+plot(roc_xgb_rfe, col = "blue", main = "ROC Curve for Reduced XG Boost Model")
+```
+
+
+### Lasso Logistic Regression
+
+
+```{r}
+#LASSO Logistic Regression using glmnet package
+
+#Train a cross validation model to find optimal lambda value 
+# using cv.glmnet with alpha =1 and family = "binomial".
+cv_model_rfe <- cv.glmnet(train_feat_rfe, train_lab, family = "binomial", alpha = 1)
+
+#Extracted optimal lambda value for further tuning.
+lambda_rfe <- cv_model_rfe$lambda.min
+
+#Trained final model on all features with the optimal lambda.
+lasso_rfe <- glmnet(train_feat_rfe,train_lab,family = "binomial", 
+                alpha = 1, lambda = lambda_rfe)
+
+#Ranking probabilities given by Lasso on the training data.
+ranking_lasso.train_rfe <- predict(lasso_rfe,train_feat_rfe, type="response")
+
+#Ranking probabilities given by Lasso on the validation data.
+ranking_lasso.test_rfe <- predict(lasso_rfe,test_feat_rfe, type="response")
+
+#Transformed validation probability predictions to class predictions 
+# using 0.5 threshold
+class_test.lasso_rfe <- prob_to_class(ranking_lasso.test_rfe)
+
+#Confusion matrix for validation data.
+cm_test.lasso_rfe <- confusionMatrix(reference = as.factor(test_lab),
+                                 data = as.factor(class_test.lasso_rfe))
+
+#Test prediction results
+print(cm_test.lasso_rfe)
+
+lasso_test.roc_rfe <- roc(test_lab, as.vector(ranking_lasso.test_rfe))
+lasso_test.auc_rfe <- lasso_test.roc_rfe$auc
+
+#AUC Validation Set
+lasso_test.auc_rfe
+
+# Plot the ROC curve
+plot(lasso_test.roc_rfe, col = "blue", 
+     main = "ROC Curve for Reduced Lasso Logistic Regression Model")
+```
+
+
+### Random Forest
+
+```{r}
+# Random Forest
+trainData_rfe <- data.frame(train_feat_rfe,Class = train_lab)
+testData_rfe <- data.frame(test_feat_rfe,Class = test_lab)
+
+rf_model_rfe <- randomForest(Class ~ ., data = trainData_rfe, ntree = 100, mtry = 2, importance = TRUE)
+print(rf_model_rfe)
+
+rf_pred_rfe <- predict(rf_model_rfe, testData_rfe)
+
+# Predict and evaluate
+predictions_rfe <- prob_to_class(rf_pred_rfe)
+conf_matrix_rfe <- confusionMatrix(reference = as.factor(testData_rfe$Class), data = predictions_rfe)
+print(conf_matrix_rfe)
+
+# Feature importance
+importance(rf_model_rfe)
+varImpPlot(rf_model_rfe)
+
+# Calculate AUC
+rf_roc_rfe <- roc(testData$Class, rf_pred_rfe)  # Compute ROC curve
+rf_auc_rfe <- auc(rf_roc_rfe)                   # Calculate AUC
+print(paste("AUC:", rf_auc_rfe))
+
+# Plot the ROC curve
+plot(rf_roc_rfe, col = "blue", main = "ROC Curve for Reduced Random Forest Model")
+```
+
+
+### Decision Trees
+
+```{r}
+# Data preparation
+trainData2_rfe <- trainData_rfe
+testData2_rfe <- testData_rfe
+trainData2_rfe$Class <- as.factor(trainData2_rfe$Class)
+testData2_rfe$Class <- as.factor(testData2_rfe$Class)
+# Train the decision tree model
+tree_model_rfe <- rpart(
+  Class ~ .,          # Formula: predicting Class using all other variables
+  data = trainData2_rfe,  # Training data
+  method = "class",   # Method "class" for classification trees
+  control = rpart.control(minsplit = 20, cp = 0.01)  # Control parameters
+)
+
+# Print the model summary
+print(tree_model_rfe)
+
+# Visualize the decision tree
+rpart.plot(tree_model_rfe, type = 2, extra = 106)
+
+# Make predictions on the test set
+pred_rfe <- predict(tree_model_rfe, testData2_rfe)
+
+pred_rfe <- prob_to_class(pred_rfe[,2])
+
+# Confusion matrix to evaluate performance
+dt_conf_mat_rfe <- confusionMatrix(reference = testData2_rfe$Class, data = pred_rfe)
+print(dt_conf_mat_rfe)
+
+# For ROC and AUC
+prob_rfe <- predict(tree_model_rfe, testData2_rfe, type = "prob")[, 2]
+roc_curve_rfe <- roc(testData2_rfe$Class, prob_rfe)
+print(paste("AUC:", auc(roc_curve_rfe)))
+# Plot the ROC curve
+plot(roc_curve_rfe, col = "blue", main = "ROC Curve for Reduced Decision Trees Model")
+```
+
+## Results Summary
+
+
+```{r}
+# Comparison Table
+comparison <- rbind(confusion_matrix$byClass, 
+                    cm_test.lasso$byClass, 
+                    conf_matrix$byClass,
+                    dt_conf_mat$byClass,
+                    xgb_confusion_matrix_rfe$byClass,
+                    cm_test.lasso_rfe$byClass,
+                    conf_matrix_rfe$byClass,
+                    dt_conf_mat_rfe$byClass)
+
+colnames(comparison) <- c("Sensitivity",	"Specificity",	
+                          "Pos Pred Value",	"Neg Pred Value",	"Precision",
+                          "Recall",	"F1",	"Prevalence",	"Detection Rate",
+                          "Detection Prevalence",	"Balanced Accuracy")
+
+comparison <- cbind(Model = c("XG Boost", "Lasso Logistic Regression",
+                              "Random Forest", "Decision Trees",
+                              "XG Boost - Reduced Features", 
+                              "Lasso LR - Reduced Features",
+                              "Random Forest - Reduced Features",
+                              "Decision Trees - Reduced Features"), comparison)
+
+# Create an HTML table with column-based comparisons for maximum and minimum values, ignoring the first column
+html_table <- as.data.frame(comparison) %>%
+  mutate(across(-Model, ~ cell_spec(
+    ., format = "html",
+    bold = . == max(., na.rm = TRUE) | . == min(., na.rm = TRUE),  # Bold for max/min values in each column, ignoring the first
+    color = ifelse(. == max(., na.rm = TRUE) | . == min(., na.rm = TRUE), 
+                   "white", "black"),  # Text color
+    background = case_when(
+      . == max(., na.rm = TRUE) ~ "green",  # Green background for column max values
+      . == min(., na.rm = TRUE) ~ "red",    # Red background for column min values
+      TRUE ~ "transparent"                  # No background for other values
+    )
+  ))) %>%
+  kable(escape = FALSE, format = "html") %>%  # Create HTML table
+  kable_styling() %>%  # Apply styling to the table
+  add_header_above(c(" " = 1, 
+                     "Table 1: Difference of Performance across different models" = 11))  
+
+
+html_table
+
+html_file <- tempfile(fileext = ".html")
+save_kable(html_table, "results_ads.html")
+
+```
+
+### Key Performance Metrics:
+
+For each model, the metrics recorded include:
+
+Sensitivity: Measures the model's ability to correctly identify true positive cases (presence of heart disease).
+Specificity: Measures the model's ability to correctly identify true negatives (absence of heart disease).
+Precision: Reflects the proportion of positive predictions that are correct.
+Recall: Similar to sensitivity, it is the model's ability to detect true positives.
+F1 Score: A harmonic mean of precision and recall, useful when there’s an imbalance between classes.
+AUC (Area Under the Curve): Provides a single measure of model performance by summarizing the trade-off between sensitivity and specificity across thresholds.
+
+### Model Comparisons
+
+From the results file, each model’s performance metrics were compared on two sets of features: the full dataset and the reduced feature set selected through Recursive Feature Elimination (RFE).
+
+XGBoost:
+
+With the full feature set, XGBoost performed well, showing high sensitivity and specificity, with a notable AUC score.
+On the reduced feature set, XGBoost maintained similar performance levels, indicating that the selected features captured the most relevant patterns without adding noise.
+
+
+Lasso Logistic Regression:
+
+Lasso’s performance was consistent between the full and reduced datasets, showing good precision and recall. This suggests that the model benefited from the reduced feature set by focusing on the most informative features, potentially minimizing overfitting.
+
+
+Random Forest:
+
+Random Forest demonstrated robust performance across both datasets, with high sensitivity and a strong AUC score. This model benefited from reduced dimensionality, likely due to its tendency to overfit when too many features are involved.
+
+
+Decision Trees:
+
+Decision Trees showed lower performance relative to other models, with moderate sensitivity and specificity. However, on the reduced feature set, Decision Trees saw a slight improvement, indicating that simplifying features helped focus the decision process.
+
+
+
+
