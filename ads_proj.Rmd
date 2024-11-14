@@ -3,9 +3,9 @@ title: "Early Heart Disease Detection"
 author: "Team 9"
 date: "`r Sys.Date()`"
 output:
-  pdf_document:
-    toc: yes
   html_document:
+    toc: yes
+  pdf_document:
     toc: yes
 subtitle: "Applied Data Science"
 ---
@@ -169,41 +169,52 @@ data %>%
 # Distribution of numeric variables
 numeric_cols <- sapply(data, is.numeric)
 data_num <- data[, numeric_cols]
-data_num %>% 
+dist_plot <- data_num %>% 
   gather() %>% 
   ggplot(aes(value)) + 
   geom_histogram(bins = 30, color = "black", fill = "lightblue") +
   facet_wrap(~ key, scales = "free") +
   theme_minimal() +
   labs(title = "Distributions of Numeric Variables")
+print(dist_plot)
+ggsave("numeric_variable_distributions.png", plot = dist_plot)
 
 # Distribution of categorical variables
 categorical_cols <- sapply(data, is.factor)
 data_cat <- data[, categorical_cols]
 for (col in names(data_cat)) {
-  print(ggplot(data, aes_string(col)) + 
+  cat_plot <- ggplot(data, aes_string(col)) + 
           geom_bar(fill = "lightgreen", color = "black") +
           theme_minimal() +
-          labs(title = paste("Distribution of", col)))
+          labs(title = paste("Distribution of", col))
+  print(cat_plot)
+  ggsave(paste0("distribution_", col, ".png"), plot = cat_plot)
 }
 
 # Target variable distribution
-ggplot(data, aes(x = Class)) + 
+target_plot <- ggplot(data, aes(x = Class)) + 
   geom_bar(fill = "salmon", color = "black") +
   theme_minimal() +
   labs(title = "Target Variable Distribution (Disease Presence)")
+print(target_plot)
+ggsave("target_variable_distribution.png", plot = target_plot)
 
 # Outlier detection with boxplots
-data_num %>%
+boxplot_plot <- data_num %>%
   gather() %>%
   ggplot(aes(x = key, y = value)) +
   geom_boxplot(fill = "skyblue", color = "black", outlier.colour = "red", outlier.shape = 16) +
   theme_minimal() +
   labs(title = "Boxplots for Numeric Variables") +
   coord_flip()
+print(boxplot_plot)
+ggsave("boxplots_numeric_variables.png", plot = boxplot_plot)
 
 # Visualize missing data
 missmap(data, main = "Missing Data Map", col = c("red", "grey"), legend = TRUE)
+dev.copy(png, "missing_data_map.png")
+dev.off()
+
 
 ```
 
@@ -307,6 +318,8 @@ print(confusion_matrix)
 importance_matrix <- xgb.importance(model = xgb_model)
 print(importance_matrix)
 xgb.plot.importance(importance_matrix)
+dev.copy(png, "xgboost_feature_importance.png")
+dev.off()
 
 # AUC score
 # Calculate AUC
@@ -316,6 +329,9 @@ print(paste("AUC:", auc_xgb))
 
 # Plot the ROC curve
 plot(roc_xgb, col = "blue", main = "ROC Curve for XG Boost Model")
+dev.copy(png, "xgboost_roc_curve.png")
+dev.off()
+
 ```
 
 
@@ -372,6 +388,9 @@ lasso_test.auc
 
 # Plot the ROC curve
 plot(lasso_test.roc, col = "blue", main = "ROC Curve for Lasso Logistic Regression Model")
+dev.copy(png, "lasso_roc_curve.png")
+dev.off()
+
 ```
 
 
@@ -404,6 +423,8 @@ print(conf_matrix)
 # Feature importance
 importance(rf_model)
 varImpPlot(rf_model)
+dev.copy(png, "random_forest_feature_importance.png")
+dev.off()
 
 # Calculate AUC
 rf_roc <- roc(testData$Class, rf_pred)  # Compute ROC curve
@@ -412,6 +433,9 @@ print(paste("AUC:", rf_auc))
 
 # Plot the ROC curve
 plot(rf_roc, col = "blue", main = "ROC Curve for Random Forest Model")
+dev.copy(png, "random_forest_roc_curve.png")
+dev.off()
+
 ```
 
 
@@ -442,6 +466,8 @@ print(tree_model)
 
 # Visualize the decision tree
 rpart.plot(tree_model, type = 2, extra = 106)
+dev.copy(png, "decision_tree_plot.png")
+dev.off()
 
 # Make predictions on the test set
 pred <- predict(tree_model, testData2)
@@ -457,6 +483,9 @@ roc_curve <- roc(testData2$Class, prob)
 print(paste("AUC:", auc(roc_curve)))
 # Plot the ROC curve
 plot(roc_curve, col = "blue", main = "ROC Curve for Decision Trees Model")
+dev.copy(png, "decision_tree_roc_curve.png")
+dev.off()
+
 ```
 
 
@@ -472,6 +501,9 @@ We generated a correlation matrix for the numeric features and visualized it wit
 # Find correlation between features and objective label
 all <- cbind(train_feat,train_lab)
 corrplot(cor(as.matrix(all)))
+dev.copy(png, "correlation_matrix.png")
+dev.off()
+
 ```
 
 ### Recursive Feature Elimination (RFE)
@@ -559,6 +591,8 @@ print(xgb_importance_matrix_rfe)
 
 # Plot the importance
 xgb.plot.importance(xgb_importance_matrix_rfe)
+dev.copy(png, "reduced_xgboost_feature_importance.png")
+dev.off()
 
 # AUC score
 # Calculate AUC
@@ -568,6 +602,9 @@ print(paste("AUC:", auc_xgb_rfe))
 
 # Plot the ROC curve
 plot(roc_xgb_rfe, col = "blue", main = "ROC Curve for Reduced XG Boost Model")
+dev.copy(png, "reduced_xgboost_roc_curve.png")
+dev.off()
+
 ```
 
 
@@ -614,6 +651,9 @@ lasso_test.auc_rfe
 # Plot the ROC curve
 plot(lasso_test.roc_rfe, col = "blue", 
      main = "ROC Curve for Reduced Lasso Logistic Regression Model")
+dev.copy(png, "reduced_lasso_roc_curve.png")
+dev.off()
+
 ```
 
 
@@ -637,6 +677,8 @@ print(conf_matrix_rfe)
 # Feature importance
 importance(rf_model_rfe)
 varImpPlot(rf_model_rfe)
+dev.copy(png, "reduced_random_forest_feature_importance.png")
+dev.off()
 
 # Calculate AUC
 rf_roc_rfe <- roc(testData$Class, rf_pred_rfe)  # Compute ROC curve
@@ -645,6 +687,9 @@ print(paste("AUC:", rf_auc_rfe))
 
 # Plot the ROC curve
 plot(rf_roc_rfe, col = "blue", main = "ROC Curve for Reduced Random Forest Model")
+dev.copy(png, "reduced_random_forest_roc_curve.png")
+dev.off()
+
 ```
 
 
@@ -669,6 +714,8 @@ print(tree_model_rfe)
 
 # Visualize the decision tree
 rpart.plot(tree_model_rfe, type = 2, extra = 106)
+dev.copy(png, "reduced_decision_tree_plot.png")
+dev.off()
 
 # Make predictions on the test set
 pred_rfe <- predict(tree_model_rfe, testData2_rfe)
@@ -685,6 +732,9 @@ roc_curve_rfe <- roc(testData2_rfe$Class, prob_rfe)
 print(paste("AUC:", auc(roc_curve_rfe)))
 # Plot the ROC curve
 plot(roc_curve_rfe, col = "blue", main = "ROC Curve for Reduced Decision Trees Model")
+dev.copy(png, "reduced_decision_tree_roc_curve.png")
+dev.off()
+
 ```
 
 ## Results Summary
